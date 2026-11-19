@@ -317,7 +317,7 @@ fun TripDetailScreen(tripId: Long, onBack: () -> Unit) {
             }
 
             // Photo popup during playback
-            AnimatedVisibility(popup != null, enter = scaleIn() + fadeIn(), exit = scaleOut() + fadeOut(), modifier = Modifier.align(Alignment.Center)) {
+            androidx.compose.animation.AnimatedVisibility(visible = popup != null, enter = scaleIn() + fadeIn(), exit = scaleOut() + fadeOut(), modifier = Modifier.align(Alignment.Center)) {
                 popup?.let { p ->
                     Surface(shape = RoundedCornerShape(24.dp), shadowElevation = 12.dp, color = Color.White) {
                         Column(Modifier.padding(8.dp)) {
