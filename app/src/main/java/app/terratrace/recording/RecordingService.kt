@@ -7,6 +7,10 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
 import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
@@ -24,6 +28,8 @@ import app.terratrace.app
 import app.terratrace.data.TrackPointEntity
 import app.terratrace.data.Trip
 import app.terratrace.data.TripKind
+import app.terratrace.geo.AltitudeFusion
+import app.terratrace.geo.AltitudeSource
 import app.terratrace.geo.Fix
 import app.terratrace.geo.GeoPoint
 import app.terratrace.geo.LiveStats
@@ -33,6 +39,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
@@ -45,6 +52,7 @@ import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.concurrent.Executors
 
 /** Live recording state shared between the service and the UI. */
 data class RecState(
@@ -59,6 +67,7 @@ data class RecState(
     val speedMps: Double? = null,
     val altitudeM: Double? = null,
     val accuracyM: Float? = null,
+    val altitudeSource: AltitudeSource? = null,
     val hasFix: Boolean = false,
     val line: List<GeoPoint> = emptyList(),
 )
@@ -108,8 +117,12 @@ object Recorder {
     }
 }
 
-class RecordingService : Service(), LocationListener {
+class RecordingService : Service(), LocationListener, SensorEventListener {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    /** All fix processing happens on one thread, in order. */
+    private val fixThread = Executors.newSingleThreadExecutor().asCoroutineDispatcher()
+    private val fusion = AltitudeFusion()
+    private var barometerOn = false
     private val writes = Channel<TrackPointEntity>(Channel.UNLIMITED)
     private var filter = TrackFilter()
     private var stats = LiveStats()
@@ -223,6 +236,7 @@ class RecordingService : Service(), LocationListener {
         try {
             lm.requestLocationUpdates(LocationManager.GPS_PROVIDER, mode.intervalMs, mode.minDistanceM, this, Looper.getMainLooper())
             listening = true
+            startBarometer()
         } catch (e: SecurityException) {
             Recorder.set { it.copy(hasFix = false) }
         } catch (e: IllegalArgumentException) {
@@ -234,6 +248,7 @@ class RecordingService : Service(), LocationListener {
         if (!listening) return
         getSystemService(LocationManager::class.java)?.removeUpdates(this)
         listening = false
+        stopBarometer()
     }
 
     private fun startTicker() {
@@ -250,12 +265,20 @@ class RecordingService : Service(), LocationListener {
     }
 
     override fun onLocationChanged(location: Location) {
+        if (tripId == null || Recorder.state.value.paused) return
+        scope.launch(fixThread) { process(location) }
+    }
+
+    private fun process(location: Location) {
         val id = tripId ?: return
-        if (Recorder.state.value.paused) return
+        val gpsMsl = mslAltitude(location)
+        val vAcc = if (location.hasVerticalAccuracy()) location.verticalAccuracyMeters else null
+        val terrain = runCatching { app.terrain.elevation(location.latitude, location.longitude) }.getOrNull()
+        val (altitude, source) = synchronized(fusion) { fusion.fuse(terrain, gpsMsl, vAcc) to fusion.lastSource }
         val fix = Fix(
             location.latitude, location.longitude, location.time,
             if (location.hasAccuracy()) location.accuracy else null,
-            if (location.hasAltitude()) location.altitude else null,
+            altitude,
             if (location.hasSpeed()) location.speed else null,
         )
         Recorder.set {
@@ -263,6 +286,7 @@ class RecordingService : Service(), LocationListener {
                 hasFix = true,
                 accuracyM = fix.accuracyM,
                 altitudeM = fix.altitudeM ?: it.altitudeM,
+                altitudeSource = source ?: it.altitudeSource,
                 speedMps = fix.speedMps?.toDouble(),
             )
         }
@@ -288,6 +312,42 @@ class RecordingService : Service(), LocationListener {
             is TrackFilter.Decision.Reject -> Unit
         }
     }
+
+    /**
+     * GPS chips report height above the WGS84 ellipsoid, which differs from sea level by the geoid
+     * (tens of metres in places). Android 14+ can convert to mean sea level offline.
+     */
+    private fun mslAltitude(location: Location): Double? {
+        if (Build.VERSION.SDK_INT >= 34) {
+            if (!location.hasMslAltitude() && location.hasAltitude()) {
+                runCatching { android.location.altitude.AltitudeConverter().addMslAltitudeToLocation(this, location) }
+            }
+            if (location.hasMslAltitude()) return location.mslAltitudeMeters
+        }
+        return if (location.hasAltitude()) location.altitude else null
+    }
+
+    private fun startBarometer() {
+        if (barometerOn) return
+        val sm = getSystemService(SensorManager::class.java) ?: return
+        val sensor = sm.getDefaultSensor(Sensor.TYPE_PRESSURE) ?: return
+        barometerOn = sm.registerListener(this, sensor, SensorManager.SENSOR_DELAY_NORMAL, 1_000_000)
+    }
+
+    private fun stopBarometer() {
+        if (!barometerOn) return
+        getSystemService(SensorManager::class.java)?.unregisterListener(this)
+        barometerOn = false
+    }
+
+    override fun onSensorChanged(event: SensorEvent) {
+        if (event.sensor.type != Sensor.TYPE_PRESSURE) return
+        val hPa = event.values.firstOrNull()?.toDouble() ?: return
+        if (hPa < 100 || hPa > 1100) return
+        synchronized(fusion) { fusion.onBarometer(AltitudeFusion.pressureToAltitude(hPa)) }
+    }
+
+    override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
 
     // Required on API < 30 where these are abstract.
     @Deprecated("Deprecated in Java")
@@ -338,6 +398,7 @@ class RecordingService : Service(), LocationListener {
     override fun onDestroy() {
         stopUpdates()
         scope.cancel()
+        fixThread.close()
         super.onDestroy()
     }
 

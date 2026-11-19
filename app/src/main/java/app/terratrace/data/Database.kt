@@ -60,6 +60,8 @@ interface PointDao {
 
     @Query("SELECT * FROM track_points WHERE tripId = :tripId ORDER BY id DESC LIMIT 1")
     suspend fun lastPoint(tripId: Long): TrackPointEntity?
+
+    @Update suspend fun updateAll(p: List<TrackPointEntity>)
 }
 
 @Dao
@@ -81,6 +83,7 @@ interface WaypointDao {
     @Insert suspend fun insertAll(w: List<WaypointEntity>)
     @Query("SELECT * FROM waypoints WHERE tripId = :tripId") suspend fun waypointsFor(tripId: Long): List<WaypointEntity>
     @Query("SELECT * FROM waypoints WHERE tripId = :tripId") fun observe(tripId: Long): Flow<List<WaypointEntity>>
+    @Update suspend fun update(w: WaypointEntity)
 }
 
 @Dao

@@ -36,6 +36,7 @@ Nguyên tắc sản phẩm (dùng để giải quyết tranh cãi khi thiết k�
 | GPX/KML | Bộ đọc SAX tự viết (stream, không tải hết DOM) | File 50MB vẫn không tràn bộ nhớ |
 | Video | MediaCodec (H.264) + `Surface.lockHardwareCanvas` + MediaMuxer | 100% offline, không cần FFmpeg (tiết kiệm ~20MB APK) |
 | Ảnh poster | MapSnapshotter (dùng tile đã cache) + Canvas | Có bản đồ thật nếu vùng đã tải; fallback nền địa hình cách điệu |
+| Độ cao | Áp kế (cảm biến áp suất) + mô hình địa hình offline (Terrain Tiles, zoom 12 ≈ 30 m) + GPS quy về mực nước biển | Độ cao GPS sai 10–20 m; áp kế đo thay đổi ~1 m; địa hình cho mốc tuyệt đối không cần sóng |
 
 ---
 
@@ -78,6 +79,7 @@ Vùng bản đồ offline do MapLibre tự quản lý trong cơ sở dữ liệu
 - Trước khi tải hiển thị **ước lượng số tile & dung lượng**. Chặn vùng > 120.000 tile (gợi ý giảm mức chi tiết hoặc chia nhỏ vùng).
 - Cảnh báo khi đang dùng dữ liệu di động (mạng tính phí).
 - Theo dõi tiến độ, tạm dừng/tiếp tục, xoá vùng. Khi không có mạng, MapLibre tự lấy tile từ cache.
+- **Kèm dữ liệu độ cao địa hình** (mặc định bật): tải ô Terrarium zoom 12 phủ cùng vùng (≈ 60 KB/ô, tối đa 3.000 ô). Dùng để đo/hiệu chỉnh độ cao khi offline.
 - Ba kiểu bản đồ: *Outdoor* (Liberty), *Sáng* (Positron), *Nổi bật* (Bright). Vùng tải theo kiểu nào thì kiểu đó dùng offline.
 
 ### 4.2 Ghi lộ trình GPS
@@ -89,6 +91,12 @@ Vùng bản đồ offline do MapLibre tự quản lý trong cơ sở dữ liệu
   - Bỏ điểm cách điểm trước < max(2 m, accuracy/2) khi chưa quá 30 giây (đứng yên → không làm bẩn track).
   - Thời gian di chuyển chỉ cộng khi vận tốc đoạn > 0,5 m/s và khoảng cách giữa 2 điểm < 60 giây.
   - Độ cao tích luỹ dùng **ngưỡng trễ 4 m** để loại dao động độ cao GPS (sai số GPS dọc thường 10–15 m).
+- **Độ cao chính xác** (lớp `AltitudeFusion`, có unit test):
+  - Máy có áp kế: độ cao = áp kế + độ lệch. Độ lệch neo theo địa hình (nếu có ô DEM) hoặc trung bình 5 lần GPS đầu, sau đó hiệu chỉnh chậm để bù thời tiết thay đổi áp suất. Thay đổi độ cao chính xác ~1 m, không bị nhiễu GPS.
+  - Máy không có áp kế: dùng độ cao địa hình nếu có, nếu không thì GPS.
+  - GPS trả độ cao so với ellipsoid WGS84; Android 14+ được quy đổi offline sang mực nước biển (`AltitudeConverter`).
+  - HUD ghi rõ nguồn độ cao: Áp kế / Địa hình / GPS.
+- **Hiệu chỉnh độ cao sau chuyến đi**: thay độ cao từng điểm bằng mô hình địa hình (tự tải ô còn thiếu nếu có mạng), tính lại thống kê. GPX nhập không có độ cao được tự điền.
 - Mất tín hiệu > 5 phút (hầm, hang) → tự tạo **segment** mới, không nối đường thẳng xuyên núi.
 - Tạm dừng/Tiếp tục → segment mới.
 - **Khôi phục**: mỗi điểm ghi ngay vào DB. Khi mở app mà còn chuyến `isRecording` nhưng service không chạy → banner *"Chuyến đi đang dở — Tiếp tục ghi / Kết thúc"*.
@@ -165,7 +173,9 @@ Vùng bản đồ offline do MapLibre tự quản lý trong cơ sở dữ liệu
 | GPS lạnh, điểm đầu sai lệch lớn | Bỏ điểm accuracy > 35 m |
 | Vào hầm/hang | Gap > 5 phút → segment mới |
 | Đứng chờ đèn đỏ / nghỉ chân | Không cộng điểm, không cộng thời gian di chuyển |
-| Độ cao GPS dao động | Ngưỡng trễ 4 m |
+| Độ cao GPS dao động | Ngưỡng trễ 4 m; áp kế; hiệu chỉnh theo địa hình |
+| Áp suất thay đổi do thời tiết (bão, mưa) | Độ lệch áp kế được kéo chậm về mốc địa hình/GPS |
+| Đi trên cầu, cáp treo, máy bay | Áp kế phản ánh đúng; "Hiệu chỉnh theo địa hình" sẽ đưa về mặt đất nên không dùng cho đoạn này |
 | File GPX 50MB | Đọc dạng stream, đơn giản hoá (Douglas‑Peucker) khi vẽ |
 | GPX không có thời gian | Phát lại theo quãng đường |
 | Ảnh bị xoá GPS do quyền | Xin `ACCESS_MEDIA_LOCATION`, nếu vẫn thiếu thì nội suy theo thời gian |
@@ -184,10 +194,11 @@ Vùng bản đồ offline do MapLibre tự quản lý trong cơ sở dữ liệu
 - Phát lại hành trình, biểu đồ độ cao.
 - Poster PNG, video MP4 720p.
 - Vùng riêng tư, xoá toàn bộ dữ liệu.
+- Độ cao chính xác: áp kế, dữ liệu địa hình offline, quy đổi mực nước biển, hiệu chỉnh độ cao chuyến đi.
 
 ### v1.1
 - Nhập `.mbtiles/.pmtiles` tự host; gói bản đồ theo tỉnh dựng sẵn.
-- Đường đồng mức & hillshade (DEM offline).
+- Đường đồng mức & hillshade vẽ từ dữ liệu địa hình đã tải.
 - Dẫn đường theo GPX: cảnh báo lệch tuyến, khoảng cách còn lại, ETA.
 - Widget màn hình khoá, Wear OS.
 

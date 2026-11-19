@@ -27,6 +27,7 @@ import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.WarningAmber
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -53,6 +54,9 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.terratrace.app
+import app.terratrace.dem.TerrainStore
+import app.terratrace.geo.Terrarium
+import kotlinx.coroutines.launch
 import app.terratrace.geo.Bounds
 import app.terratrace.map.DetailLevel
 import app.terratrace.map.OfflineRegions
@@ -81,11 +85,15 @@ fun OfflineMapsScreen() {
     var name by remember { mutableStateOf("") }
     var meteredWarning by remember { mutableStateOf(false) }
     var deleteTarget by remember { mutableStateOf<RegionInfo?>(null) }
+    var withTerrain by remember { mutableStateOf(true) }
+    val demProgress by app.terrain.download.collectAsStateWithLifecycle()
 
     LaunchedEffect(Unit) { app.offline.refresh() }
 
     val tiles = bounds?.let { app.offline.estimateTiles(it, level) } ?: 0L
     val tooBig = tiles > OfflineRegions.MAX_TILES
+    val demTiles = bounds?.let { Terrarium.tilesFor(it).size } ?: 0
+    val demTooBig = demTiles > TerrainStore.MAX_TILES
 
     fun startDownload() {
         val b = bounds ?: return
@@ -96,6 +104,7 @@ fun OfflineMapsScreen() {
             pixelRatio = density,
             onError = { actions.showMessage("Không tạo được vùng tải: $it") },
         )
+        if (withTerrain && !demTooBig) app.scope.launch { app.terrain.downloadArea(b) }
         name = ""
         actions.showMessage("Đang tải bản đồ. Bạn có thể dùng app bình thường trong lúc chờ.")
     }
@@ -177,6 +186,28 @@ fun OfflineMapsScreen() {
                     Spacer(Modifier.width(8.dp))
                     Text("Tải vùng này")
                 }
+            }
+            Row(
+                Modifier.fillMaxWidth().padding(top = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Checkbox(checked = withTerrain && !demTooBig, enabled = !demTooBig, onCheckedChange = { withTerrain = it })
+                Column(Modifier.weight(1f)) {
+                    Text("Kèm dữ liệu độ cao địa hình", style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        if (demTooBig) "Vùng quá rộng cho dữ liệu độ cao, hãy chọn vùng nhỏ hơn"
+                        else "Giúp đo độ cao chính xác khi mất sóng · ≈ ${Fmt.bytes(demTiles * 60_000L)}",
+                        style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            demProgress?.takeIf { it.running || it.failed > 0 }?.let { d ->
+                Spacer(Modifier.height(6.dp))
+                LinearProgressIndicator(progress = { if (d.total > 0) d.done / d.total.toFloat() else 1f }, modifier = Modifier.fillMaxWidth())
+                Text(
+                    if (d.running) "Dữ liệu độ cao: ${d.done}/${d.total} ô" else "Dữ liệu độ cao: ${d.failed} ô tải lỗi, hãy thử lại khi có mạng tốt hơn",
+                    style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
             if (tooBig) {
                 Row(Modifier.padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {

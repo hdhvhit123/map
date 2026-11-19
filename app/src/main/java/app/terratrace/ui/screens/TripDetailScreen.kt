@@ -44,6 +44,7 @@ import androidx.compose.material.icons.outlined.Movie
 import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material.icons.outlined.StarOutline
+import androidx.compose.material.icons.outlined.Terrain
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
@@ -185,6 +186,7 @@ fun TripDetailScreen(tripId: Long, onBack: () -> Unit) {
     var rename by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
     var exportDialog by remember { mutableStateOf(false) }
+    var elevationDialog by remember { mutableStateOf<Int?>(null) } // = terrain tiles missing
     var busy by remember { mutableStateOf<String?>(null) }
     var busyProgress by remember { mutableStateOf<Float?>(null) }
     var busyJob by remember { mutableStateOf<Job?>(null) }
@@ -402,6 +404,11 @@ fun TripDetailScreen(tripId: Long, onBack: () -> Unit) {
                         }
                     }
                     item { ActionChip(Icons.Outlined.Share, "GPX / KML") { exportDialog = true } }
+                    if (rawPoints.isNotEmpty()) item {
+                        ActionChip(Icons.Outlined.Terrain, "Hiệu chỉnh độ cao") {
+                            scope.launch { elevationDialog = app.repo.terrainTilesMissing(tripId) }
+                        }
+                    }
                 }
 
                 // Stats
@@ -477,6 +484,41 @@ fun TripDetailScreen(tripId: Long, onBack: () -> Unit) {
                 }) { Text("Xoá") }
             },
             dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Huỷ") } },
+        )
+    }
+
+    elevationDialog?.let { missing ->
+        val online = app.offline.isOnline()
+        AlertDialog(
+            onDismissRequest = { elevationDialog = null },
+            icon = { Icon(Icons.Outlined.Terrain, null) },
+            title = { Text("Hiệu chỉnh độ cao") },
+            text = {
+                Text(
+                    "Thay độ cao GPS (sai số 10–20 m) bằng độ cao mặt đất từ mô hình địa hình offline (lưới ≈ 30 m). " +
+                        "Tổng độ cao leo và biểu đồ sẽ sát thực tế hơn." +
+                        when {
+                            missing == 0 -> ""
+                            online -> "\n\nCần tải $missing ô dữ liệu địa hình (≈ ${Fmt.bytes(missing * 60_000L)})."
+                            else -> "\n\nCòn $missing ô dữ liệu địa hình chưa tải; phần đó sẽ giữ độ cao cũ. Hãy kết nối mạng để tải đủ."
+                        },
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            },
+            confirmButton = {
+                Button(onClick = {
+                    elevationDialog = null
+                    runExport("Đang hiệu chỉnh độ cao…") {
+                        if (missing > 0 && online) app.repo.downloadTerrainFor(tripId)
+                        val r = app.repo.correctElevation(tripId)
+                        actions.showMessage(
+                            if (r.corrected == 0) "Chưa có dữ liệu địa hình cho khu vực này"
+                            else "Đã hiệu chỉnh ${r.corrected}/${r.total} điểm" + if (r.tilesMissing > 0) " · thiếu ${r.tilesMissing} ô địa hình" else ""
+                        )
+                    }
+                }) { Text(if (missing > 0 && online) "Tải & hiệu chỉnh" else "Hiệu chỉnh") }
+            },
+            dismissButton = { TextButton(onClick = { elevationDialog = null }) { Text("Huỷ") } },
         )
     }
 

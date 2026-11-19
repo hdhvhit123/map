@@ -170,12 +170,16 @@ fun MapScreen() {
         // ---- Top HUD ----
         Column(Modifier.statusBarsPadding().padding(12.dp).fillMaxWidth()) {
             AnimatedContent(rec.active, label = "hud", transitionSpec = { fadeIn() togetherWith fadeOut() }) { recording ->
-                if (recording) RecordingHud(rec.speedMps, rec.altitudeM, rec.distanceM, rec.elapsedMs, rec.elevationGainM, rec.paused, rec.hasFix)
-                else IdleHud(
-                    speedMps = location?.takeIf { it.hasSpeed() }?.speed?.toDouble(),
-                    altitudeM = location?.takeIf { it.hasAltitude() }?.altitude,
-                    accuracy = location?.takeIf { it.hasAccuracy() }?.accuracy,
-                )
+                if (recording) RecordingHud(rec.speedMps, rec.altitudeM, rec.altitudeSource?.label, rec.distanceM, rec.elapsedMs, rec.elevationGainM, rec.paused, rec.hasFix)
+                else {
+                    val terrainAlt = location?.let { app.terrain.elevation(it.latitude, it.longitude) }
+                    IdleHud(
+                        speedMps = location?.takeIf { it.hasSpeed() }?.speed?.toDouble(),
+                        altitudeM = terrainAlt ?: location?.takeIf { it.hasAltitude() }?.altitude,
+                        altitudeLabel = if (terrainAlt != null) "Độ cao · địa hình" else "Độ cao · GPS",
+                        accuracy = location?.takeIf { it.hasAccuracy() }?.accuracy,
+                    )
+                }
             }
             AnimatedVisibility(orphan != null && !rec.active) {
                 Surface(
@@ -314,11 +318,11 @@ private object GeoPointDistance {
 }
 
 @Composable
-private fun IdleHud(speedMps: Double?, altitudeM: Double?, accuracy: Float?) {
+private fun IdleHud(speedMps: Double?, altitudeM: Double?, altitudeLabel: String, accuracy: Float?) {
     GlassPanel {
         Row(horizontalArrangement = Arrangement.spacedBy(22.dp), verticalAlignment = Alignment.CenterVertically) {
             HudValue("Tốc độ", Fmt.speedKmh(speedMps), "km/h")
-            HudValue("Độ cao", altitudeM?.let { "%,d".format(it.toInt()) } ?: "–", "m")
+            HudValue(altitudeLabel, altitudeM?.let { "%,d".format(it.toInt()) } ?: "–", "m")
             HudValue("GPS", accuracy?.let { "±${it.toInt()}" } ?: "–", "m")
         }
     }
@@ -326,7 +330,7 @@ private fun IdleHud(speedMps: Double?, altitudeM: Double?, accuracy: Float?) {
 
 @Composable
 private fun RecordingHud(
-    speedMps: Double?, altitudeM: Double?, distanceM: Double, elapsedMs: Long, gainM: Double, paused: Boolean, hasFix: Boolean,
+    speedMps: Double?, altitudeM: Double?, altitudeSource: String?, distanceM: Double, elapsedMs: Long, gainM: Double, paused: Boolean, hasFix: Boolean,
 ) {
     GlassPanel(Modifier.fillMaxWidth()) {
         Column {
@@ -345,7 +349,7 @@ private fun RecordingHud(
                 val (dv, du) = Fmt.distanceValue(distanceM)
                 HudValue("Quãng đường", dv, du, big = true)
                 HudValue("Tốc độ", Fmt.speedKmh(speedMps), "km/h")
-                HudValue("Độ cao", altitudeM?.let { "%,d".format(it.toInt()) } ?: "–", "m")
+                HudValue(altitudeSource?.let { "Độ cao · $it" } ?: "Độ cao", altitudeM?.let { "%,d".format(it.toInt()) } ?: "–", "m")
                 HudValue("Leo", "%,d".format(gainM.toInt()), "m")
             }
         }

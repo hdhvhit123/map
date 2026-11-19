@@ -124,6 +124,29 @@ fun SettingsScreen() {
             TextButton(onClick = { addZone = true }, modifier = Modifier.padding(8.dp)) { Text("+ Thêm vùng riêng tư tại vị trí hiện tại") }
         }
 
+        SectionHeader("Độ cao")
+        Card {
+            val hasBaro = remember {
+                (context.getSystemService(android.hardware.SensorManager::class.java))
+                    ?.getDefaultSensor(android.hardware.Sensor.TYPE_PRESSURE) != null
+            }
+            var terrainSize by remember { mutableStateOf(app.terrain.sizeBytes()) }
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(if (hasBaro) "Máy có cảm biến áp suất ✓" else "Máy không có cảm biến áp suất", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    if (hasBaro) "Độ cao khi ghi được đo bằng áp kế (chính xác ~1 m khi leo/xuống), tự hiệu chỉnh theo địa hình hoặc GPS."
+                    else "Độ cao lấy từ dữ liệu địa hình offline nếu đã tải, nếu không thì từ GPS (sai số 10–20 m).",
+                    style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(8.dp))
+                Text("Dữ liệu độ cao địa hình: ${app.terrain.tileCount()} ô · ${String.format(java.util.Locale.US, "%.1f MB", terrainSize / 1e6)}", style = MaterialTheme.typography.titleMedium)
+                Text("Tải kèm khi tải bản đồ offline. Nguồn: Terrain Tiles (SRTM/NASA, Mapzen) trên AWS.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (terrainSize > 0) {
+                    TextButton(onClick = { app.terrain.clear(); terrainSize = 0 }) { Text("Xoá dữ liệu độ cao") }
+                }
+            }
+        }
+
         SectionHeader("Dữ liệu")
         Card {
             Column(Modifier.padding(16.dp)) {
