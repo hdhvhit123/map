@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="forest">#2F5D3A</color>
+    <color name="forest_dark">#1F3F27</color>
+    <color name="terra">#C8643B</color>
+    <color name="stone50">#F5F3EF</color>
+    <color name="night">#151816</color>
+</resources>
