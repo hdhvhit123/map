@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Mountain ridge with a terracotta trail ending in a pin -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+    <path android:fillColor="#F5F3EF" android:pathData="M28,72 L46,44 L55,56 L63,46 L80,72z" />
+    <path android:fillColor="#2F5D3A" android:pathData="M46,44 L50.5,51 L46,49 L42,54z" />
+    <path android:strokeColor="#C8643B" android:strokeWidth="4" android:strokeLineCap="round" android:strokeLineJoin="round"
+        android:fillColor="#00000000" android:pathData="M30,80 C40,74 46,82 56,76 C64,71 66,64 70,60" />
+    <path android:fillColor="#C8643B" android:pathData="M70,38 C64.5,38 61,42 61,46.5 C61,52.5 70,60 70,60 C70,60 79,52.5 79,46.5 C79,42 75.5,38 70,38z" />
+    <path android:fillColor="#F5F3EF" android:pathData="M70,43 A3.5,3.5 0 1,1 69.99,43z" />
+</vector>
